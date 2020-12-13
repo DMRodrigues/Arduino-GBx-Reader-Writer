@@ -1,6 +1,6 @@
 # Arduino-GBx-Reader-Writer
 
-Read or write Game Boy save game to/from PC.
+Read or Write Game Boy save game to/from PC.
 
 
 
@@ -23,14 +23,22 @@ Introduction
 ------------
 
 While searching for a way to read and write save games from my game boy cartridges (because you know...if the battery die you say goodbye to save data) I didn't come across any cheap solution.
+
 After some search I stumbled on ATmega1284p from way back when I started using Arduino and learning about AVR. I did remember this ATmega1284p (already on breadboard!!!) had maniacbug code to work with Arduino! Lucky me!!
+
 Then I started reading about cartridges and how to communicate with them, destroyed an Nintendo DS to get the cartridge connector, removed the protection to be compatible with DMG and CGB cartridges and it was time to code!
+
 This works with ATmega1284p (Mighty 1284P from [maniacbug](https://github.com/maniacbug/mighty-1284p), but [MightyCore](https://github.com/MCUdude/MightyCore) should also be compatible!
+
 WARNING: you need RS232 to USB converter, like the TDIFT232R, and use `PD0` and `PD1` pins.
 
+
 Helpful websites:
+
 [The Cartridge Header](https://gbdev.gg8.se/wiki/articles/The_Cartridge_Header)
+
 [Memory Bank Controllers](https://gbdev.gg8.se/wiki/articles/Memory_Bank_Controllers#Multicart_MBCs)
+
 [GBCartRead – Gameboy Cart Reader](https://www.insidegadgets.com/projects/gbcartread-gameboy-cart-reader)
 
 
@@ -60,13 +68,13 @@ Pinout
 | PA6         | A14           |
 | PA7         | A15           |
 | PB0         | D0            |
-| PB0         | D1            |
-| PB0         | D2            |
-| PB0         | D3            |
-| PB0         | D4            |
-| PB0         | D5            |
-| PB0         | D6            |
-| PB0         | D7            |
+| PB1         | D1            |
+| PB2         | D2            |
+| PB3         | D3            |
+| PB4         | D4            |
+| PB5         | D5            |
+| PB6         | D6            |
+| PB7         | D7            |
 
 
 
@@ -84,6 +92,7 @@ How to
 Compatibility
 ----------------------
 I've developed on macOS Catalina version 0.15.7 (19H2), but it should work with any POSIX compatible OS.
+
 Porting to Windows are still ongoing.
 
 ### TTY device names
@@ -105,6 +114,7 @@ $ make
 
 ### Use
 `./gbx-reader-writer -p /dev/cu.usbserial-A600JW4P`
+
 Then interact with the shell by pressing any number from 0 - 4.
 
 
