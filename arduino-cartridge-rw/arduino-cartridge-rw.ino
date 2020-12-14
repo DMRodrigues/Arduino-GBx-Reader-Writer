@@ -33,15 +33,15 @@
 // ChipSelect - PD6
 
 ///////////////////////////////////////////////////////////
-#define SERIAL_BAUDRATE   ( 400000 )
-#define SERIAL_TIMEOUT    ( 3      ) /* seconds */
-#define SEND_CHUNK_SIZE   ( 128    )
+#define SERIAL_BAUDRATE   ( 115200 )
+#define SEND_CHUNK_SIZE   ( 64     )
 
 ///////////////////////////////////////////////////////////
 #define READ_HEADER_COMMAND   0x01
 #define READ_ROM_COMMAND      0x02
 #define READ_RAM_COMMAND      0x03
 #define WRITE_RAM_COMMAND     0x04
+#define GET_RAM_SIZE          0xF0
 
 ///////////////////////////////////////////////////////////
 #define WritePinLow()         ( PORTD &= ~(1<<PD4)                     )
@@ -123,10 +123,19 @@ void WriteByte(unsigned int address, unsigned char data)
   PORTB = data;
   WritePinLow();
   asm volatile("nop");
-  asm volatile("nop");
-  asm volatile("nop");
   WritePinHigh();
   DataPinsInput();
+}
+
+///////////////////////////////////////////////////////////
+void WriteByteRAM(unsigned int address, unsigned char data)
+{
+  ChipSelectPinLow();
+  WriteByte(address, data);
+  asm volatile("nop");
+  asm volatile("nop");
+  asm volatile("nop");
+  ChipSelectPinHigh();
 }
 
 ///////////////////////////////////////////////////////////
@@ -175,13 +184,13 @@ unsigned long GetMaxAddressRAM()
 void SwitchROMBank(unsigned short bank)
 {
   if (CartridgeType >= 5) {
+    WriteByte(0x2100, bank);
+  }
+  else {
     /* 00h: ROM only          */
     /* 01h: MBC1              */
     /* 02h: MBC1 + RAM        */
     /* 03h: MBC1 + RAM + BATT */
-    WriteByte(0x2100, bank);
-  }
-  else {
     WriteByte(0x6000, 0);
     WriteByte(0x4000, bank >> 5);
     WriteByte(0x2000, bank & 0x1F);
@@ -305,20 +314,50 @@ void ReadSendRAM()
       ramAddress += SEND_CHUNK_SIZE;
     }
   }
-  
+
   DisableRAM();
-  
+
   ControlPinsLow();
 }
 
 ///////////////////////////////////////////////////////////
 void RecvWriteRAM()
 {
-  Serial.write(0x10);
-  Serial.write(0x02);
-  SendPacketSize(0);
+  unsigned char bank;
+  unsigned char ramBanks;
+  unsigned long ramAddress;
+  unsigned long ramMaxAddress;
 
-  // TODO
+  if (RamSize == 0) return;
+
+  ramBanks = GetRAMBanks();
+  ramMaxAddress = GetMaxAddressRAM();
+
+  ControlPinsHigh();
+
+  // some MBC2 fix apparently needed
+  ReadByte(0x0134);
+
+  // some MBC1 fix apparently needed, to set RAM mode
+  if (CartridgeType <= 4) WriteByte(0x6000, 1);
+
+  EnableRAM();
+
+  for (bank = 0; bank < ramBanks; bank++) {
+    ramAddress = 0xA000;
+    SwitchRAMBank(bank);
+    while (ramAddress < ramMaxAddress) {
+      unsigned char data;
+      while (Serial.available() <= 0);
+      data = Serial.read();
+      WriteByteRAM(ramAddress, data);
+      ramAddress++;
+    }
+  }
+
+  DisableRAM();
+
+  ControlPinsLow();
 }
 
 ///////////////////////////////////////////////////////////
@@ -346,24 +385,22 @@ void loop()
   unsigned char inputOK = 0;
   unsigned char command = 0;
 
-  while (Serial.available() <= 0) {
+  while (Serial.available() <= 6) {
     _delay_ms(250);
   }
-
+  
   /* Need: DLE + STX + SIZE(4) + CMD */
-  HasDLE = (Serial.read() == 0x10);
-  if (!HasDLE) HasDLE = (Serial.read() == 0x10);
-  HasSTX = (Serial.read() == 0x02);
-
+  do {
+    HasDLE = (Serial.read() == 0x10);
+  } while (!HasDLE && Serial.available());
+  if (/*HasDLE && */Serial.available()) HasSTX = (Serial.read() == 0x02);
   if (HasDLE && HasSTX && (Serial.available() == 5)) {
     unsigned long theSize;
     unsigned char packetSize[4];
-
     packetSize[0] = Serial.read();
     packetSize[1] = Serial.read();
     packetSize[2] = Serial.read();
     packetSize[3] = Serial.read();
-
     theSize = GetLongFromCHAR(packetSize);
     if (theSize == 1) {
       inputOK = 1;
@@ -392,6 +429,19 @@ void loop()
       case WRITE_RAM_COMMAND:
         RecvWriteRAM();
         break;
+      case GET_RAM_SIZE:
+        Serial.write(0x10);
+        Serial.write(0x02);
+        SendPacketSize(4);
+        if (RamSize == 0) {
+          SendPacketSize(0);
+        }
+        else {
+          unsigned char ramBanks = GetRAMBanks();
+          unsigned long ramMaxAddress = GetMaxAddressRAM();
+          SendPacketSize(ramBanks * (ramMaxAddress - 0xA000UL));
+        }
+        break;
       default:
         break;
     }
@@ -400,4 +450,6 @@ void loop()
     unsigned char BAD_CMD[6] = { 0x10, 0x02, 0x00, 0x00, 0x00, 0x00 };
     Serial.write(BAD_CMD, 6);
   }
+
+  Serial.flush();
 }

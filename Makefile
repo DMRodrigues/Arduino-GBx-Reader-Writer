@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall
+CFLAGS = -Wall -pedantic
 
 all:
 	$(CC) $(CFLAGS) gbx-reader-writer.c -o gbx-reader-writer
