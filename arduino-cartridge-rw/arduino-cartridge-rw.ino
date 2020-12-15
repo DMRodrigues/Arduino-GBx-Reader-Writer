@@ -33,7 +33,7 @@
 // ChipSelect - PD6
 
 ///////////////////////////////////////////////////////////
-#define SERIAL_BAUDRATE   ( 115200 )
+#define SERIAL_BAUDRATE   ( 230400 )
 #define SEND_CHUNK_SIZE   ( 64     )
 
 ///////////////////////////////////////////////////////////
@@ -382,73 +382,65 @@ void loop()
 {
   unsigned char HasDLE = 0;
   unsigned char HasSTX = 0;
-  unsigned char inputOK = 0;
   unsigned char command = 0;
 
-  while (Serial.available() <= 6) {
+  while (Serial.available() <= 0) {
     _delay_ms(250);
   }
-  
+
   /* Need: DLE + STX + SIZE(4) + CMD */
   do {
     HasDLE = (Serial.read() == 0x10);
   } while (!HasDLE && Serial.available());
   if (/*HasDLE && */Serial.available()) HasSTX = (Serial.read() == 0x02);
   if (HasDLE && HasSTX && (Serial.available() == 5)) {
-    unsigned long theSize;
+    long cmdSize;
     unsigned char packetSize[4];
     packetSize[0] = Serial.read();
     packetSize[1] = Serial.read();
     packetSize[2] = Serial.read();
     packetSize[3] = Serial.read();
-    theSize = GetLongFromCHAR(packetSize);
-    if (theSize == 1) {
-      inputOK = 1;
-      command = Serial.read();
-    }
-  }
-  else {
-    while (Serial.available()) Serial.read(); /* discard */
-  }
-
-  /* Process */
-  if (inputOK) {
-    switch (command) {
-      case READ_HEADER_COMMAND:
-        ResetVariables();
-        ReadSendHeader();
-        break;
-      case READ_ROM_COMMAND:
-        /* We need: CartridgeType + RomSize */
-        ReadSendROM();
-        break;
-      case READ_RAM_COMMAND:
-        /* We need: CartridgeType + RamSize */
-        ReadSendRAM();
-        break;
-      case WRITE_RAM_COMMAND:
-        RecvWriteRAM();
-        break;
-      case GET_RAM_SIZE:
-        Serial.write(0x10);
-        Serial.write(0x02);
-        SendPacketSize(4);
-        if (RamSize == 0) {
-          SendPacketSize(0);
-        }
-        else {
-          unsigned char ramBanks = GetRAMBanks();
-          unsigned long ramMaxAddress = GetMaxAddressRAM();
-          SendPacketSize(ramBanks * (ramMaxAddress - 0xA000UL));
-        }
-        break;
-      default:
-        break;
-    }
+    cmdSize = GetLongFromCHAR(packetSize);
+    if (cmdSize == 1) command = Serial.read();
   }
   else {
     unsigned char BAD_CMD[6] = { 0x10, 0x02, 0x00, 0x00, 0x00, 0x00 };
+    while (Serial.available()) Serial.read(); /* discard */
     Serial.write(BAD_CMD, 6);
+  }
+
+  /* Process */
+  switch (command) {
+    case READ_HEADER_COMMAND:
+      ResetVariables();
+      ReadSendHeader();
+      break;
+    case READ_ROM_COMMAND:
+      /* We need: CartridgeType + RomSize */
+      ReadSendROM();
+      break;
+    case READ_RAM_COMMAND:
+      /* We need: CartridgeType + RamSize */
+      ReadSendRAM();
+      break;
+    case WRITE_RAM_COMMAND:
+      RecvWriteRAM();
+      break;
+    case GET_RAM_SIZE:
+      Serial.write(0x10);
+      Serial.write(0x02);
+      SendPacketSize(4);
+      if (RamSize == 0) {
+        SendPacketSize(0);
+      }
+      else {
+        unsigned char ramBanks = GetRAMBanks();
+        unsigned long ramMaxAddress = GetMaxAddressRAM();
+        SendPacketSize(ramBanks * (ramMaxAddress - 0xA000UL));
+      }
+      break;
+    default:
+      break;
   }
 
   Serial.flush();

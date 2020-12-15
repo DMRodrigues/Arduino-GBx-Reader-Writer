@@ -30,7 +30,7 @@
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-#define SERIAL_BAUDRATE   ( 115200 )
+#define SERIAL_BAUDRATE   ( 230400 )
 #define SERIAL_TIMEOUT    ( 3      ) /* seconds */
 #define SEND_CHUNK_SIZE   ( 32     ) /* the arduino is much slower than PC */
 
@@ -467,7 +467,7 @@ static void read_metadata(HANDLE fd, unsigned char to_print)
 
   if (send_packet_routine(fd, READ_HEADER_COMMAND)) return;
 
-  wait_ms(100); /* give some time */
+  wait_ms(50); /* give some time */
 
   ret = receive_packet_header_size(fd);
   if (ret > 0) {
@@ -516,9 +516,12 @@ static void read_rom(HANDLE fd)
 
   flush_serial(fd);
 
-  if (send_packet_routine(fd, READ_ROM_COMMAND)) return;
+  if (send_packet_routine(fd, READ_ROM_COMMAND)) {
+    close(fp);
+    return;
+  }
 
-  wait_ms(100); /* give some time */
+  wait_ms(50); /* give some time */
 
   size = receive_packet_header_size(fd);
   if (size > 0) {
@@ -560,9 +563,12 @@ static void read_ram(HANDLE fd)
 
   flush_serial(fd);
 
-  if (send_packet_routine(fd, READ_RAM_COMMAND)) return;
+  if (send_packet_routine(fd, READ_RAM_COMMAND)) {
+    close(fp);
+    return;
+  }
 
-  wait_ms(100); /* give some time */
+  wait_ms(50); /* give some time */
 
   size = receive_packet_header_size(fd);
   if (size > 0) {
@@ -579,6 +585,8 @@ static void verify_ram(HANDLE fd, FILE *fp, unsigned long ram_size)
 {
   char option;
   char clear_option;
+  char *RAM_read;
+  char *RAM_file
 
   if (verbose) printf("verify_ram\n");
   
@@ -586,41 +594,41 @@ static void verify_ram(HANDLE fd, FILE *fp, unsigned long ram_size)
   option = getchar();
   do { clear_option = getchar(); } while (clear_option != '\n');
 
-  if (option == 'y') {
-    /* UGLY => TODO: compare chunks of data */
-    char *RAM_read = (char*)malloc(ram_size);
-    char *RAM_file = (char*)malloc(ram_size);
+  if (option != 'y') return;
 
-    //go back to begin of file
-    rewind(fp);
-    fread(RAM_file, 1, ram_size, fp);
-    
-    flush_serial(fd); // safety
+  flush_serial(fd);
 
-    if (send_packet_routine(fd, READ_RAM_COMMAND)) return;
+  if (send_packet_routine(fd, READ_RAM_COMMAND)) return;
 
-    wait_ms(100); /* give some time */
-    
-    if (receive_packet_header_size(fd) == ram_size) {
-      if (receive_routine_buffer(fd, ram_size, RAM_read, ram_size, verbose) == 0) {
-        if (memcmp(RAM_read, RAM_file, ram_size) != 0) {
-          printf("ERROR COMPARING RAM!\n");
-        }
-        else {
-          printf("RAM OK!\n");
-        }
+  /* UGLY => TODO: compare chunks of data */
+  RAM_read = (char*)malloc(ram_size); // assume success
+  RAM_file = (char*)malloc(ram_size); // assume success
+
+  /* go back to begin of file */
+  rewind(fp);
+  fread(RAM_file, 1, ram_size, fp); // assume success
+
+  printf("#==========================#\n");
+  if (receive_packet_header_size(fd) == ram_size) {
+    if (receive_routine_buffer(fd, ram_size, RAM_read, ram_size, verbose) == 0) {
+      if (memcmp(RAM_read, RAM_file, ram_size) != 0) {
+        printf("ERROR COMPARING RAM!\n");
       }
       else {
-        printf("Error with RAM, try again\n");
+        printf("RAM OK!\n");
       }
     }
     else {
       printf("Error with RAM, try again\n");
     }
-    
-    free(RAM_file);
-    free(RAM_read);
   }
+  else {
+    printf("Error with RAM, try again\n");
+  }
+  printf("\n");
+
+  free(RAM_file);
+  free(RAM_read);
 
 }
 
@@ -688,9 +696,12 @@ static void write_ram(HANDLE fd)
 
   flush_serial(fd);
 
-  if (send_packet_routine(fd, WRITE_RAM_COMMAND)) return;
+  if (send_packet_routine(fd, WRITE_RAM_COMMAND)) {
+    close(fp);
+    return;
+  }
 
-  wait_ms(100); /* give some time */
+  wait_ms(50); /* give some time */
 
   current_size = 0;
   printf("#==========================#\n");
@@ -704,7 +715,7 @@ static void write_ram(HANDLE fd)
       break;
     }
     current_size += SEND_CHUNK_SIZE;
-    wait_ms(100); /* give some time */
+    wait_ms(50); /* give some time */
     print_state_console(ram_size, current_size);
   } while (!ctrlc && (current_size < ram_size));
   printf("\n");
@@ -845,7 +856,7 @@ int main(int argc, char *argv[])
   tty_attr.c_oflag &= ~OPOST;
   tty_attr.c_lflag &= ~(ISIG | ICANON | IEXTEN | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE);
 
-  if (tcsetattr(fd, TCSANOW, &tty_attr) == -1) {
+  if (tcsetattr(fd, TCSAFLUSH, &tty_attr) == -1) {
     printf("Error while setting %s options: %s\n", port_name, strerror(errno));
     close(fd);
     return EXIT_FAILURE;
