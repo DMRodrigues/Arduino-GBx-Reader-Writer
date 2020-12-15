@@ -31,7 +31,7 @@
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
 #define SERIAL_BAUDRATE   ( 230400 )
-#define SERIAL_TIMEOUT    ( 3      ) /* seconds */
+#define SERIAL_TIMEOUT    ( 2      ) /* seconds */
 #define SEND_CHUNK_SIZE   ( 32     ) /* the arduino is much slower than PC */
 
 ///////////////////////////////////////////////////////////
@@ -168,6 +168,7 @@ static void print_usage(const char *program_name)
   printf("  -h, --help               print this screen.\n");
   printf("\nExample:\n");
   printf("  %s -p /dev/ttyACM0\n", program_name);
+  printf("\n");
 }
 
 ///////////////////////////////////////////////////////////
@@ -341,7 +342,7 @@ static ssize_t receive_packet_header_size(HANDLE fd)
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-static unsigned char receive_routine_buffer(HANDLE fd, ssize_t packet_size, void *out_buff, ssize_t out_buff_size, unsigned char print_state)
+static unsigned char receive_routine_buffer(HANDLE fd, ssize_t packet_size, unsigned char *out_buff, ssize_t out_buff_size, unsigned char print_state)
 {
   ssize_t ret;
   ssize_t offset;
@@ -454,7 +455,7 @@ static unsigned char get_ram_size(HANDLE fd, unsigned long *out_ram_size)
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-static void read_metadata(HANDLE fd, unsigned char to_print)
+static void read_header(HANDLE fd, unsigned char to_print)
 {
   ssize_t ret;
   char cartridge_info[32];
@@ -471,7 +472,7 @@ static void read_metadata(HANDLE fd, unsigned char to_print)
 
   ret = receive_packet_header_size(fd);
   if (ret > 0) {
-    if (receive_routine_buffer(fd, ret, cartridge_info, sizeof(cartridge_info), to_print)) return;
+    if (receive_routine_buffer(fd, ret, (unsigned char *)cartridge_info, sizeof(cartridge_info), to_print)) return;
     if (to_print) {
       printf("#==========================#\n");
       printf("Rom title: %s\n", cartridge_info + 1);
@@ -517,7 +518,7 @@ static void read_rom(HANDLE fd)
   flush_serial(fd);
 
   if (send_packet_routine(fd, READ_ROM_COMMAND)) {
-    close(fp);
+    fclose(fp);
     return;
   }
 
@@ -564,7 +565,7 @@ static void read_ram(HANDLE fd)
   flush_serial(fd);
 
   if (send_packet_routine(fd, READ_RAM_COMMAND)) {
-    close(fp);
+    fclose(fp);
     return;
   }
 
@@ -585,8 +586,8 @@ static void verify_ram(HANDLE fd, FILE *fp, unsigned long ram_size)
 {
   char option;
   char clear_option;
-  char *RAM_read;
-  char *RAM_file
+  unsigned char *RAM_read;
+  unsigned char *RAM_file;
 
   if (verbose) printf("verify_ram\n");
   
@@ -601,8 +602,8 @@ static void verify_ram(HANDLE fd, FILE *fp, unsigned long ram_size)
   if (send_packet_routine(fd, READ_RAM_COMMAND)) return;
 
   /* UGLY => TODO: compare chunks of data */
-  RAM_read = (char*)malloc(ram_size); // assume success
-  RAM_file = (char*)malloc(ram_size); // assume success
+  RAM_read = (unsigned char *)malloc(ram_size); // assume success
+  RAM_file = (unsigned char *)malloc(ram_size); // assume success
 
   /* go back to begin of file */
   rewind(fp);
@@ -697,7 +698,7 @@ static void write_ram(HANDLE fd)
   flush_serial(fd);
 
   if (send_packet_routine(fd, WRITE_RAM_COMMAND)) {
-    close(fp);
+    fclose(fp);
     return;
   }
 
@@ -794,7 +795,7 @@ int main(int argc, char *argv[])
         break;
       case 'h':
         print_usage(argv[0]);
-        break;
+        return EXIT_SUCCESS;
       case '?': /* If getopt() encounters an option character that was not in optstring, then '?' is returned */
         print_usage(argv[0]);
         return EXIT_FAILURE;
@@ -875,7 +876,7 @@ int main(int argc, char *argv[])
     printf("0) Read Cartidge Header\n");
     printf("1) Read ROM\n");
     printf("2) Read RAM\n");
-    printf("3) WRITE RAM\n");
+    printf("3) Write RAM\n");
     printf("4) EXIT\n");
     printf("Select an option: ");
     next_option = getchar();
@@ -892,20 +893,20 @@ int main(int argc, char *argv[])
     switch (next_option) {
       case 0:
         *rom_title = 0;
-        read_metadata(fd, 1);
+        read_header(fd, 1);
         break;
       case 1:
-        read_metadata(fd, 0);
+        read_header(fd, 0);
         wait_ms(50); /* give some time */
         read_rom(fd);
         break;
       case 2:
-        read_metadata(fd, 0);
+        read_header(fd, 0);
         wait_ms(50); /* give some time */
         read_ram(fd);
         break;
       case 3:
-        read_metadata(fd, 0);
+        read_header(fd, 0);
         wait_ms(50); /* give some time */
         write_ram(fd);
         break;
