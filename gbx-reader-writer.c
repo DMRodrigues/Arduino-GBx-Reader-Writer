@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <time.h>
+#include <sys/stat.h>
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
@@ -23,16 +24,16 @@
 #include <unistd.h>
 #include <termios.h>
 #include <getopt.h>
-#include <sys/stat.h>
+#include <sys/ioctl.h>
 
 #endif /* _WIN32 || _WIN64 */
 
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-#define SERIAL_BAUDRATE   ( 230400 )
-#define SERIAL_TIMEOUT    ( 2      ) /* seconds */
-#define SEND_CHUNK_SIZE   ( 32     ) /* the arduino is much slower than PC */
+#define SERIAL_BAUDRATE   ( B115200 )
+#define SERIAL_TIMEOUT    ( 3       ) /* seconds */
+#define SEND_CHUNK_SIZE   ( 32      ) /* the arduino is much slower than PC */
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
@@ -60,11 +61,19 @@ void handle_sig(int signum)
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-#define print_state_console(S,D)   ( printf("\rState: %lu of %lu (%.1f%%)", D, S, (((double)D / (double)S) * 100)), fflush(stdout) )
+#define print_state_console(S,D)   ( printf("\rState: %ld of %ld (%.1f%%)", D, S, (((double)D / (double)S) * 100)), fflush(stdout) )
 
 ///////////////////////////////////////////////////////////
 #define long_from_array(B)    ( ((unsigned long)B[0] << 24) | ((unsigned long)B[1] << 16) | ((unsigned long)B[2] << 8) | (unsigned long)B[3]          )
 #define long_to_array(B, L)   ( B[0] = ((L & 0xFF000000LU) >> 24), B[1] = ((L & 0xFF0000LU) >> 16), B[2] = ((L & 0xFF00LU) >> 8), B[3] = (L & 0xFFLU) )
+
+///////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef B115200
+#define B115200   115200
+#endif /* B115200 */
+#endif /* _WIN32 || _WIN64 */
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
@@ -121,7 +130,15 @@ static ssize_t write(HANDLE fd, const void *buf, size_t count)
   return NumberOfBytesRead;
 }
 
-#define flush_serial(fd)   ( PurgeComm(fd, PURGE_TXABORT | PURGE_RXABORT | PURGE_TXCLEAR| PURGE_RXCLEAR) )
+#define flush_serial(fd)   ( PurgeComm(fd, PURGE_TXABORT | PURGE_RXABORT | PURGE_TXCLEAR | PURGE_RXCLEAR) )
+
+static void char_to_wchar(const char* original_string, wchar_t* wide_string/* ensure space */)
+{
+  const size_t original_string_length = strlen(original_string);
+  const size_t original_string_size = original_string_length + 1;
+  memset(wide_string, 0, original_string_size);
+  mbstowcs(wide_string, original_string, original_string_size);
+}
 
 #else
 #define HANDLE   int
@@ -130,21 +147,16 @@ static ssize_t write(HANDLE fd, const void *buf, size_t count)
 
 #endif /* _WIN32 || _WIN64 */
 
-
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-#if defined(_WIN32) || defined(_WIN64)
-
-#else
-static unsigned char get_file_size(const char *path, unsigned long *out_size) {
+static unsigned char get_file_size(const char *path, ssize_t *out_size)
+{
   struct stat tmp;
   *out_size = 0;
   if (stat(path, &tmp) != 0) return 1;
-  *out_size = (unsigned long) tmp.st_size;
+  *out_size = (ssize_t)tmp.st_size;
   return 0;
 }
-
-#endif /* _WIN32 || _WIN64 */
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
@@ -161,13 +173,21 @@ static void print_packet(const unsigned char *packet, long packet_size)
 ///////////////////////////////////////////////////////////
 static void print_usage(const char *program_name)
 {
-  printf("\nUsage: %s [OPTIONS...]\n", program_name);
+#if defined(_WIN32) || defined(_WIN64)
+  printf("\nUsage: %s <port> [OPTIONS...]\n", program_name);
   printf("\n");
-  printf("  -p, --port=/dev/*        arduino serial port.\n");
+  printf("  -v, --verbose            print debug.\n");
+  printf("\nExample:\n");
+  printf("  %s COM9\n", program_name);
+#else
+  printf("\nUsage: %s -p <port> [OPTIONS...]\n", program_name);
+  printf("\n");
+/*printf("  -p, --port=/dev/tty*     arduino serial port.\n");*/
   printf("  -v, --verbose            print debug.\n");
   printf("  -h, --help               print this screen.\n");
   printf("\nExample:\n");
   printf("  %s -p /dev/ttyACM0\n", program_name);
+#endif /* _WIN32 || _WIN64 */
   printf("\n");
 }
 
@@ -246,7 +266,7 @@ static const char* print_ram_size(unsigned char ram_size)
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-static unsigned char send_packet_routine(HANDLE fd, unsigned char CMD)
+static unsigned char send_packet_routine(HANDLE fd, unsigned char cmd)
 {
   int i;
   unsigned char tx_packet[7];
@@ -260,7 +280,7 @@ static unsigned char send_packet_routine(HANDLE fd, unsigned char CMD)
   tx_packet[i++] = 0x00;
   tx_packet[i++] = 0x00;
   tx_packet[i++] = 0x01;
-  tx_packet[i++] = CMD;
+  tx_packet[i++] = cmd;
 
   if (verbose) print_packet(tx_packet, sizeof(tx_packet));
   if (write(fd, tx_packet, sizeof(tx_packet)) != sizeof(tx_packet)) {
@@ -307,10 +327,10 @@ static ssize_t receive_packet_header_size(HANDLE fd)
     }
   } while (!ctrlc && time_valid(start));
 
-  if (ctrlc) return -2;
+  if (ctrlc) return -1;
   if (!has_dle || !has_stx) {
     printf("TIMEOUT: DLE and/or STX not received!\n");
-    return -3;
+    return -2;
   }
 
   /* receive the size */
@@ -321,20 +341,20 @@ static ssize_t receive_packet_header_size(HANDLE fd)
     unsigned char buff_size[4];
     start = get_time();
     do {
-      ret = read(fd, &(buff_size[i]), j);
+      ret = read(fd, buff_size + i, j);
       i += ret;
       j -= ret;
     } while ((j > 0) && !ctrlc && time_valid(start));
     if (i == 4) {
       available = long_from_array(buff_size);
-      if (verbose) printf("Received packet: %d %d %d %d => Total: %lu\n", buff_size[0], buff_size[1], buff_size[2], buff_size[3], available);
+      if (verbose) printf("Received packet: %d %d %d %d => Total: %ld\n", buff_size[0], buff_size[1], buff_size[2], buff_size[3], available);
     }
   }
 
-  if (ctrlc) return -2;
+  if (ctrlc) return -1;
   if (available == -1) {
     printf("Error receiving packet size\n");
-    return -1;
+    return -3;
   }
 
   return available;
@@ -345,8 +365,8 @@ static ssize_t receive_packet_header_size(HANDLE fd)
 static unsigned char receive_routine_buffer(HANDLE fd, ssize_t packet_size, unsigned char *out_buff, ssize_t out_buff_size, unsigned char print_state)
 {
   ssize_t ret;
+  ssize_t start;
   ssize_t offset;
-  unsigned long start;
   const ssize_t _packet_size = packet_size;
 
   if (verbose) printf("receive_routine_buffer\n");
@@ -391,7 +411,7 @@ static unsigned char receive_routine_buffer(HANDLE fd, ssize_t packet_size, unsi
 static unsigned char receive_routine_file(HANDLE fd, ssize_t packet_size, FILE *fp, unsigned char print_state)
 {
   ssize_t ret;
-  unsigned long start;
+  ssize_t start;
   unsigned char rx_chunk[512];
   const ssize_t _packet_size = packet_size;
 
@@ -432,7 +452,7 @@ static unsigned char receive_routine_file(HANDLE fd, ssize_t packet_size, FILE *
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-static unsigned char get_ram_size(HANDLE fd, unsigned long *out_ram_size)
+static unsigned char get_ram_size(HANDLE fd, ssize_t *out_ram_size)
 {
   ssize_t size;
   unsigned char ram_info[4];
@@ -450,6 +470,8 @@ static unsigned char get_ram_size(HANDLE fd, unsigned long *out_ram_size)
   }
   
   *out_ram_size = long_from_array(ram_info);
+  if (verbose) printf("Got RAM size: %ld\n", *out_ram_size);
+
   return 0;
 }
 
@@ -457,7 +479,7 @@ static unsigned char get_ram_size(HANDLE fd, unsigned long *out_ram_size)
 ///////////////////////////////////////////////////////////
 static void read_header(HANDLE fd, unsigned char to_print)
 {
-  ssize_t ret;
+  ssize_t size;
   char cartridge_info[32];
 
   if (verbose) printf("read_metadata\n");
@@ -470,9 +492,9 @@ static void read_header(HANDLE fd, unsigned char to_print)
 
   wait_ms(50); /* give some time */
 
-  ret = receive_packet_header_size(fd);
-  if (ret > 0) {
-    if (receive_routine_buffer(fd, ret, (unsigned char *)cartridge_info, sizeof(cartridge_info), to_print)) return;
+  size = receive_packet_header_size(fd);
+  if (size > 0) {
+    if (receive_routine_buffer(fd, size, (unsigned char *)cartridge_info, sizeof(cartridge_info), to_print)) return;
     if (to_print) {
       printf("#==========================#\n");
       printf("Rom title: %s\n", cartridge_info + 1);
@@ -483,6 +505,10 @@ static void read_header(HANDLE fd, unsigned char to_print)
       printf("Checksum: %d\n\n", cartridge_info[cartridge_info[0] + 1 + 5]);
     }
     memcpy(rom_title, cartridge_info + 1, cartridge_info[0] + 1);
+  }
+  else if (size == 0) {
+    /* We must have size */
+    printf("Error got no packet size!\n");
   }
 
 }
@@ -527,6 +553,10 @@ static void read_rom(HANDLE fd)
   size = receive_packet_header_size(fd);
   if (size > 0) {
     receive_routine_file(fd, size, fp, 1);
+  }
+  else if (size == 0) {
+    /* We must have size */
+    printf("Error got no packet size!\n");
   }
 
   fclose(fp);
@@ -574,6 +604,10 @@ static void read_ram(HANDLE fd)
   size = receive_packet_header_size(fd);
   if (size > 0) {
     receive_routine_file(fd, size, fp, 1);
+  }
+  else if (size == 0) {
+    /* We must have size */
+    printf("Error got no packet size!\n");
   }
 
   fclose(fp);
@@ -638,8 +672,8 @@ static void verify_ram(HANDLE fd, FILE *fp, unsigned long ram_size)
 static void write_ram(HANDLE fd)
 {
   FILE *fp;
-  unsigned long ram_size;
-  unsigned long current_size;
+  ssize_t ram_size;
+  ssize_t current_size;
   char ram_filename[32];
   unsigned char tx_chunk[SEND_CHUNK_SIZE];
 
@@ -649,7 +683,6 @@ static void write_ram(HANDLE fd)
     printf("Error try again\n");
     return;
   }
-  if (verbose) printf("Got RAM size: %lu\n", ram_size);
 
   if (rom_title[0] == 0) {
     // TODO: user input file name
@@ -660,7 +693,7 @@ static void write_ram(HANDLE fd)
     int i;
     char option;
     char clear_option;
-    unsigned long compare_size;
+    ssize_t compare_size;
 
     i = strlen(rom_title);
     memcpy(ram_filename, rom_title, i + 1);
@@ -734,40 +767,46 @@ int main(int argc, char *argv[])
   int next_option;
 
 #if defined(_WIN32) || defined(_WIN64)
-  //TODO
-  fd = CreateFile(L"COM9", GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
-  if (fd != INVALID_HANDLE_VALUE) {
+  wchar_t port_name[128];
+
+  if (argc < 2) {
+    print_usage(argv[0]);
+    return EXIT_FAILURE;
+  }
+
+  char_to_wchar(argv[1], port_name);
+  fd = CreateFile(port_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+  if (fd == INVALID_HANDLE_VALUE) {
+    printf("Error opening %ws: %s\n", port_name, strerror(errno));
+    return EXIT_FAILURE;
+  }
+  else {
     BOOL Status;
     DCB dcb = { 0 };
     COMMTIMEOUTS tmo = { MAXDWORD, 0, 0, 0, 0 };
     
-    memset(&dcb, 0, sizeof(dcb));
     dcb.DCBlength = sizeof(dcb);
     Status = GetCommState(fd, &dcb);
     if (Status == FALSE) exit(1);
     
-    dcb.BaudRate = 400000;
+    dcb.BaudRate = SERIAL_BAUDRATE;
     dcb.ByteSize = 8;
     dcb.StopBits = ONESTOPBIT;
     dcb.Parity = NOPARITY;
-    //dcb.fAbortOnError = FALSE;
+    dcb.fAbortOnError = FALSE;
     Status = SetCommState(fd, &dcb);
     if (Status == FALSE) exit(1);
     
     Status = SetCommTimeouts(fd, &tmo);
     if (Status == FALSE) exit(1);
 
-    Status = SetCommMask(fd, EV_RXCHAR | EV_TXEMPTY | EV_ERR);
+    Status = SetCommMask(fd, EV_RXCHAR | EV_TXEMPTY);
     if (Status == FALSE) exit(1);
   }
-  verbose = 1;
+
+  if ((argc > 2) && strstr(argv[2], "-v")) verbose = 1;
 
 #else
-  char *port_name = NULL;
-
-  struct termios tty_attr, tty_attr_orig;
-  speed_t i_speed, o_speed;
-
   extern char *optarg;
   const char* short_options = "p:vh";
   const struct option long_options[] = {
@@ -776,6 +815,9 @@ int main(int argc, char *argv[])
     { "help",         no_argument,       NULL, 'h' },
     { 0,              0,                 0,     0  }
   };
+
+  char *port_name = NULL;
+  struct termios port_attr, port_attr_orig;
 
   /* no argument provided */
   if (argc == 1) {
@@ -825,39 +867,50 @@ int main(int argc, char *argv[])
   }
   if (verbose) printf("%s opened.\n", port_name);
 
-#if __APPLE__
-  /* Apple is limited to 230400 */
+  /* Get tty config and make backup */
+  tcgetattr(fd, &port_attr);
+  port_attr_orig = port_attr;
+
+#if 0
+// __APPLE__
+  {
+    speed_t speed = SERIAL_BAUDRATE;
+    if (ioctl(fd, 0x80045402, &speed) == -1) {
+      printf("Error calling ioctl: %s\n", strerror(errno));
+      //return EXIT_FAILURE;
+    }
+  }
+
+#else
+  {
+    speed_t i_speed, o_speed;
+    i_speed = cfgetispeed(&port_attr);
+    if (i_speed != SERIAL_BAUDRATE) {
+      if (cfsetispeed(&port_attr, SERIAL_BAUDRATE) != 0) {
+        printf("Error setting baudrate %s: %s\n", port_name, strerror(errno));
+        //return EXIT_FAILURE;
+      }
+    }
+
+    o_speed = cfgetospeed(&port_attr);
+    if (o_speed != SERIAL_BAUDRATE) {
+      if (cfsetospeed(&port_attr, SERIAL_BAUDRATE) != 0) {
+        printf("Error setting baudrate %s: %s\n", port_name, strerror(errno));
+        //return EXIT_FAILURE;
+      }
+    }
+  }
+
 #endif /* __APPLE__ */
 
-  /* Get tty config and make backup */
-  tcgetattr(fd, &tty_attr);
-  tty_attr_orig = tty_attr;
+  port_attr.c_cc[VMIN] = 0; /* Return always (non-block) */
+  port_attr.c_cc[VTIME] = 0; /* Never return from read due to timeout */
 
-  /* Configure tty */
-  i_speed = cfgetispeed(&tty_attr);
-  if (i_speed != SERIAL_BAUDRATE) {
-    if (cfsetispeed(&tty_attr, SERIAL_BAUDRATE) != 0) {
-      printf("Error setting baudrate %s: %s\n", port_name, strerror(errno));
-      //return EXIT_FAILURE;
-    }
-  }
+  port_attr.c_iflag &= ~(ICRNL | IXON);
+  port_attr.c_oflag &= ~OPOST;
+  port_attr.c_lflag &= ~(ISIG | ICANON | IEXTEN | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE);
 
-  o_speed = cfgetospeed(&tty_attr);
-  if (o_speed != SERIAL_BAUDRATE) {
-    if (cfsetospeed(&tty_attr, SERIAL_BAUDRATE)!= 0) {
-      printf("Error setting baudrate %s: %s\n", port_name, strerror(errno));
-      //return EXIT_FAILURE;
-    }
-  }
-
-  tty_attr.c_cc[VMIN] = 0; /* Return always (non-block) */
-  tty_attr.c_cc[VTIME] = 0; /* Never return from read due to timeout */
-
-  tty_attr.c_iflag &= ~(ICRNL | IXON);
-  tty_attr.c_oflag &= ~OPOST;
-  tty_attr.c_lflag &= ~(ISIG | ICANON | IEXTEN | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE);
-
-  if (tcsetattr(fd, TCSAFLUSH, &tty_attr) == -1) {
+  if (tcsetattr(fd, TCSAFLUSH, &port_attr) == -1) {
     printf("Error while setting %s options: %s\n", port_name, strerror(errno));
     close(fd);
     return EXIT_FAILURE;
@@ -922,7 +975,7 @@ int main(int argc, char *argv[])
 
 #else
   /* Revert to original tty config */
-  if (tcsetattr(fd, TCSANOW, &tty_attr_orig) == -1) {
+  if (tcsetattr(fd, TCSANOW, &port_attr_orig) == -1) {
     printf("Error while reverting original tty config: %s\n", strerror(errno));
   }
 

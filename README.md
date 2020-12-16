@@ -1,6 +1,6 @@
 # Arduino-GBx-Reader-Writer
 
-Read or Write your Game Boy save game to/from PC.
+Read or Write your Game Boy save data to/from PC.
 
 
 Table of contents
@@ -31,15 +31,13 @@ This works with ATmega1284p (Mighty 1284P from [maniacbug](https://github.com/ma
 
 Also, I didn't changed the default configuration of the ATmega1284p and I'm using 16Mhz external crystal.
 
-WARNING: you need an RS232 to USB converter, like the FT232R and use `PD0` and `PD1` pins.
+WARNING: you need an RS232 to USB converter (like the FT232R and use `PD0` and `PD1` pins).
 
 
 Helpful websites:
 
 - [The Cartridge Header](https://gbdev.gg8.se/wiki/articles/The_Cartridge_Header)
-
 - [Memory Bank Controllers](https://gbdev.gg8.se/wiki/articles/Memory_Bank_Controllers#Multicart_MBCs)
-
 - [GBCartRead – Gameboy Cart Reader](https://www.insidegadgets.com/projects/gbcartread-gameboy-cart-reader)
 
 
@@ -48,7 +46,7 @@ Pinout
 ------------
 
 | ATmega1284p | Cartridge     |
-| ---         | ---           |
+| ----------- | ------------- |
 | PD4         | WritePin      |
 | PD5         | ReadPin       |
 | PD6         | ChipSelectPin |
@@ -82,24 +80,24 @@ Pinout
 How to
 ------------
 
-1. Follow the pinout to connect the cartridge connector to ATmega1284p (don't forget the RS232 to USB converter);
-2. Connect the Arduino to your PC and upload the sketch (may need to change SERIAL_BAUDRATE);
-3. Compile the C program with a simple `make` (may need to change SERIAL_BAUDRATE if Arduino sketch was changed);
+1. Follow the pinout to connect the cartridge connector to ATmega1284p (don't forget the RS232 to USB converter)
+2. Connect the Arduino to your PC and upload the sketch (may need to change SERIAL_BAUDRATE)
+3. Compile the C program with a simple `make` (may need to change SERIAL_BAUDRATE if Arduino sketch was changed)
 4. Run the program and supply the __MINIMAL__ arguments:
-    * Arduino port e.g. `-t /dev/ttyACM0`
+    * Arduino port e.g. `-p /dev/ttyUSB0`
 
 
 
 Compatibility
 ----------------------
-I've developed on macOS Catalina version 0.15.7 (19H2), but it should work with any POSIX compatible OS.
-
-Porting to Windows are still ongoing.
+I've developed on macOS Catalina version 0.15.7 (19H2).
+I've also tested on Debian machine with GCC 8 and it should work with any POSIX compatible OS.
+On Windows I recommend installing Visual Studio!
 
 ### USB device names
-- In Mac are: `/dev/cu.usbmodem14931` or `/dev/cu.usbserial-A600JW4P`
-- In Linux are: `/dev/ttyACM*`, where * should be 0. (you need to be root, or be in [group-mode](http://playground.arduino.cc/Linux/All#Permission))
-
+- In Mac are: `/dev/cu.usbmodem14931` or `/dev/cu.usbserial-1420`
+- In Linux are: `/dev/ttyUSB*` or `/dev/ttyACM*`, where * should be 0. (you need to be root or in [group-mode](http://playground.arduino.cc/Linux/All#Permission))
+- In Windows are: `COM*`
 
 
 Example
@@ -114,7 +112,7 @@ $ make
 ```
 
 ### Use
-`./gbx-reader-writer -p /dev/cu.usbserial-A600JW4P`
+`./gbx-reader-writer -p /dev/cu.usbserial-1420`
 
 After this interact with the shell by choosing 0 - 4.
 
@@ -122,9 +120,9 @@ After this interact with the shell by choosing 0 - 4.
 
 TODO
 ------------
-- Keep porting the C code to Windows
+- Test serial speed bigger than 115200
 
-- Test Game Boy Advance games
+- Implement Game Boy Advance games logic
 
 
 
