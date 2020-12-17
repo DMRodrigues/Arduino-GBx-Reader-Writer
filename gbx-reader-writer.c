@@ -1,5 +1,6 @@
 /*
- * Program for connecting to an Arduino running the Arduino-GBx-reader-writer
+ * DMRodrigues, 2020
+ * Code for connecting to an Arduino running 'arduino-cartridge-rw' to read or write Game Boy cartridges.
  *
  * Execute with --help to see instructions.
  *
@@ -26,14 +27,19 @@
 #include <getopt.h>
 #include <sys/ioctl.h>
 
+#if __APPLE__
+#include <IOKit/serial/ioss.h>
+#endif /* __APPLE__ */
+
 #endif /* _WIN32 || _WIN64 */
 
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-#define SERIAL_BAUDRATE   ( B115200 )
-#define SERIAL_TIMEOUT    ( 3       ) /* seconds */
-#define SEND_CHUNK_SIZE   ( 32      ) /* the arduino is much slower than PC */
+#define SERIAL_BAUDRATE   ( 500000 )
+#define SERIAL_TIMEOUT    ( 3      ) /* seconds */
+#define SEND_CHUNK_SIZE   ( 32     )
+#define RECV_CHUNK_SIZE   ( 512    )
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
@@ -54,26 +60,11 @@ static char rom_title[16];
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-void handle_sig(int signum)
-{
-  ctrlc = 1;
-}
-
-///////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////
 #define print_state_console(S,D)   ( printf("\rState: %ld of %ld (%.1f%%)", D, S, (((double)D / (double)S) * 100)), fflush(stdout) )
 
 ///////////////////////////////////////////////////////////
-#define long_from_array(B)    ( ((unsigned long)B[0] << 24) | ((unsigned long)B[1] << 16) | ((unsigned long)B[2] << 8) | (unsigned long)B[3]          )
+#define long_from_array(B)    ( (((unsigned long)B[0] << 24) | ((unsigned long)B[1] << 16) | ((unsigned long)B[2] << 8) | (unsigned long)B[3])        )
 #define long_to_array(B, L)   ( B[0] = ((L & 0xFF000000LU) >> 24), B[1] = ((L & 0xFF0000LU) >> 16), B[2] = ((L & 0xFF00LU) >> 8), B[3] = (L & 0xFFLU) )
-
-///////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////
-#if defined(_WIN32) || defined(_WIN64)
-#ifndef B115200
-#define B115200   115200
-#endif /* B115200 */
-#endif /* _WIN32 || _WIN64 */
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
@@ -91,9 +82,9 @@ static void wait_ms(unsigned int in_milliseconds)
 
 static unsigned long get_time()
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (unsigned long)((ts.tv_nsec / 1000000) + (ts.tv_sec * 1000UL));
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (unsigned long)((ts.tv_nsec / 1000000) + (ts.tv_sec * 1000UL));
 }
 
 #define time_valid(S)   ( ((get_time() - S) < (SERIAL_TIMEOUT * 1000)) )
@@ -103,8 +94,24 @@ static unsigned long get_time()
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
 #if defined(_WIN32) || defined(_WIN64)
+BOOL WINAPI handle_sig(DWORD signum)
+{
+  switch (signum) {
+    case CTRL_C_EVENT:
+      ctrlc = 1;
+      return TRUE;
+    default:
+      break;
+  }
+  return FALSE;
+}
 
 #else
+void handle_sig(int signum)
+{
+  ctrlc = 1;
+}
+
 struct sigaction int_handler = {
   .sa_handler = handle_sig,
 };
@@ -131,14 +138,6 @@ static ssize_t write(HANDLE fd, const void *buf, size_t count)
 }
 
 #define flush_serial(fd)   ( PurgeComm(fd, PURGE_TXABORT | PURGE_RXABORT | PURGE_TXCLEAR | PURGE_RXCLEAR) )
-
-static void char_to_wchar(const char* original_string, wchar_t* wide_string/* ensure space */)
-{
-  const size_t original_string_length = strlen(original_string);
-  const size_t original_string_size = original_string_length + 1;
-  memset(wide_string, 0, original_string_size);
-  mbstowcs(wide_string, original_string, original_string_size);
-}
 
 #else
 #define HANDLE   int
@@ -176,13 +175,12 @@ static void print_usage(const char *program_name)
 #if defined(_WIN32) || defined(_WIN64)
   printf("\nUsage: %s <port> [OPTIONS...]\n", program_name);
   printf("\n");
-  printf("  -v, --verbose            print debug.\n");
+  printf("  -v            print debug.\n");
   printf("\nExample:\n");
   printf("  %s COM9\n", program_name);
 #else
   printf("\nUsage: %s -p <port> [OPTIONS...]\n", program_name);
   printf("\n");
-/*printf("  -p, --port=/dev/tty*     arduino serial port.\n");*/
   printf("  -v, --verbose            print debug.\n");
   printf("  -h, --help               print this screen.\n");
   printf("\nExample:\n");
@@ -293,7 +291,7 @@ static unsigned char send_packet_routine(HANDLE fd, unsigned char cmd)
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-static ssize_t receive_packet_header_size(HANDLE fd)
+static ssize_t recv_packet_header_size(HANDLE fd)
 {
   ssize_t ret;
   ssize_t available;
@@ -302,7 +300,7 @@ static ssize_t receive_packet_header_size(HANDLE fd)
   unsigned char has_stx;
   unsigned long start;
 
-  if (verbose) printf("receive_packet_header_size\n");
+  if (verbose) printf("recv_packet_header_size\n");
 
   /* receive the header of packet */
   c = 0;
@@ -362,16 +360,15 @@ static ssize_t receive_packet_header_size(HANDLE fd)
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-static unsigned char receive_routine_buffer(HANDLE fd, ssize_t packet_size, unsigned char *out_buff, ssize_t out_buff_size, unsigned char print_state)
+static unsigned char recv_routine_buffer(HANDLE fd, ssize_t packet_size, unsigned char *out_buff, ssize_t out_buff_size, unsigned char print_state)
 {
   ssize_t ret;
   ssize_t start;
   ssize_t offset;
   const ssize_t _packet_size = packet_size;
 
-  if (verbose) printf("receive_routine_buffer\n");
+  if (verbose) printf("recv_routine_buffer\n");
 
-  if (print_state) printf("#==========================#\n");
   offset = 0;
   start = get_time();
   do {
@@ -386,7 +383,7 @@ static unsigned char receive_routine_buffer(HANDLE fd, ssize_t packet_size, unsi
       start = get_time();
     }
     else if (ret == 0) {
-      wait_ms(100); /* let's wait */
+      wait_ms(10); /* let's wait */
     }
     else {
       printf("Nasty: %s\n", strerror(errno));
@@ -408,16 +405,15 @@ static unsigned char receive_routine_buffer(HANDLE fd, ssize_t packet_size, unsi
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
-static unsigned char receive_routine_file(HANDLE fd, ssize_t packet_size, FILE *fp, unsigned char print_state)
+static unsigned char recv_routine_file(HANDLE fd, ssize_t packet_size, FILE *fp, unsigned char print_state)
 {
   ssize_t ret;
   ssize_t start;
-  unsigned char rx_chunk[512];
+  unsigned char rx_chunk[RECV_CHUNK_SIZE];
   const ssize_t _packet_size = packet_size;
 
-  if (verbose) printf("receive_routine_file\n");
+  if (verbose) printf("recv_routine_file\n");
 
-  if (print_state) printf("#==========================#\n");
   start = get_time();
   do {
     ret = read(fd, rx_chunk, sizeof(rx_chunk));
@@ -430,7 +426,7 @@ static unsigned char receive_routine_file(HANDLE fd, ssize_t packet_size, FILE *
       start = get_time();
     }
     else if (ret == 0) {
-      wait_ms(100); /* let's wait */
+      wait_ms(5); /* let's wait */
     }
     else {
       printf("Nasty: %s\n", strerror(errno));
@@ -452,6 +448,90 @@ static unsigned char receive_routine_file(HANDLE fd, ssize_t packet_size, FILE *
 
 ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////
+static unsigned char send_routine_file(HANDLE fd, FILE *fp, ssize_t file_size, unsigned char print_state)
+{
+  ssize_t current_size = 0;
+  unsigned char tx_chunk[SEND_CHUNK_SIZE];
+
+  if (verbose) printf("send_routine_file\n");
+
+  do {
+    if (fread(tx_chunk, 1, SEND_CHUNK_SIZE, fp) != SEND_CHUNK_SIZE) {
+      printf("Error reading from file: %s\n", strerror(errno));
+      break;
+    }
+    if (write(fd, tx_chunk, SEND_CHUNK_SIZE) != SEND_CHUNK_SIZE) {
+      printf("Error sending packet: %s\n", strerror(errno));
+      break;
+    }
+    current_size += SEND_CHUNK_SIZE;
+    wait_ms(10); /* let's wait */
+    if (print_state) print_state_console(file_size, current_size);
+  } while (!ctrlc && (current_size < file_size));
+  if (print_state) printf("\n");
+
+  if (ctrlc) return 1;
+  if (current_size < file_size) {
+    printf("ERROR: missing data!!!\n");
+    return 2;
+  }
+
+  return 0;
+}
+
+///////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////
+static void verify_ram(HANDLE fd, FILE *fp, unsigned long ram_size)
+{
+  char option;
+  char clear_option;
+  unsigned char *RAM_read;
+  unsigned char *RAM_file;
+
+  if (verbose) printf("verify_ram\n");
+
+  printf("Verify RAM?[y/n]? ");
+  option = getchar();
+  do { clear_option = getchar(); } while (clear_option != '\n');
+
+  if (option != 'y') return;
+  printf("Reading RAM\n");
+
+  flush_serial(fd);
+
+  if (send_packet_routine(fd, READ_RAM_COMMAND)) return;
+
+  /* UGLY => TODO: compare chunks of data */
+  RAM_read = (unsigned char *)malloc(ram_size); // assume success
+  RAM_file = (unsigned char *)malloc(ram_size); // assume success
+
+  /* go back to begin of file */
+  rewind(fp);
+  fread(RAM_file, 1, ram_size, fp); // assume success
+
+  if (recv_packet_header_size(fd) == ram_size) {
+    if (recv_routine_buffer(fd, ram_size, RAM_read, ram_size, verbose) == 0) {
+      if (memcmp(RAM_read, RAM_file, ram_size) != 0) {
+        printf("=> ERROR COMPARING RAM!\n");
+      }
+      else {
+        printf("=> RAM OK!\n");
+      }
+    }
+    else {
+      printf("=> Error with RAM, try again\n");
+    }
+  }
+  else {
+    printf("=> Error with RAM, try again\n");
+  }
+
+  free(RAM_file);
+  free(RAM_read);
+}
+
+///////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////
 static unsigned char get_ram_size(HANDLE fd, ssize_t *out_ram_size)
 {
   ssize_t size;
@@ -464,9 +544,9 @@ static unsigned char get_ram_size(HANDLE fd, ssize_t *out_ram_size)
 
   if (send_packet_routine(fd, GET_RAM_SIZE)) return 1;
 
-  size = receive_packet_header_size(fd);
+  size = recv_packet_header_size(fd);
   if (size > 0) {
-    if (receive_routine_buffer(fd, size, ram_info, sizeof(ram_info), 0)) return 1;
+    if (recv_routine_buffer(fd, size, ram_info, sizeof(ram_info), 0)) return 1;
   }
   
   *out_ram_size = long_from_array(ram_info);
@@ -490,19 +570,18 @@ static void read_header(HANDLE fd, unsigned char to_print)
 
   if (send_packet_routine(fd, READ_HEADER_COMMAND)) return;
 
-  wait_ms(50); /* give some time */
+  wait_ms(10); /* give some time */
 
-  size = receive_packet_header_size(fd);
+  size = recv_packet_header_size(fd);
   if (size > 0) {
-    if (receive_routine_buffer(fd, size, (unsigned char *)cartridge_info, sizeof(cartridge_info), to_print)) return;
+    if (recv_routine_buffer(fd, size, (unsigned char *)cartridge_info, sizeof(cartridge_info), to_print)) return;
     if (to_print) {
-      printf("#==========================#\n");
       printf("Rom title: %s\n", cartridge_info + 1);
       printf("Cartridge type: %s\n", print_cartridge_string(cartridge_info[cartridge_info[0] + 1 + 1]));
       printf("Rom size: %s\n", print_rom_size(cartridge_info[cartridge_info[0] + 1 + 2]));
       printf("Ram size: %s\n", print_ram_size(cartridge_info[cartridge_info[0] + 1 + 3]));
       printf("Rom version: %d\n", cartridge_info[cartridge_info[0] + 1 + 4]);
-      printf("Checksum: %d\n\n", cartridge_info[cartridge_info[0] + 1 + 5]);
+      printf("Checksum: %d\n", cartridge_info[cartridge_info[0] + 1 + 5]);
     }
     memcpy(rom_title, cartridge_info + 1, cartridge_info[0] + 1);
   }
@@ -510,7 +589,7 @@ static void read_header(HANDLE fd, unsigned char to_print)
     /* We must have size */
     printf("Error got no packet size!\n");
   }
-
+  if (to_print) printf("\n");
 }
 
 ///////////////////////////////////////////////////////////
@@ -535,7 +614,7 @@ static void read_rom(HANDLE fd)
 
   printf("Reading ROM and saving to %s\n", rom_filename);
 
-  fp = fopen(rom_filename, "w");
+  fp = fopen(rom_filename, "wb");
   if (!fp) {
     printf("Error creating %s: %s\n", rom_title, strerror(errno));
     return;
@@ -548,19 +627,19 @@ static void read_rom(HANDLE fd)
     return;
   }
 
-  wait_ms(50); /* give some time */
+  wait_ms(10); /* give some time */
 
-  size = receive_packet_header_size(fd);
+  size = recv_packet_header_size(fd);
   if (size > 0) {
-    receive_routine_file(fd, size, fp, 1);
+    recv_routine_file(fd, size, fp, 1);
   }
   else if (size == 0) {
     /* We must have size */
     printf("Error got no packet size!\n");
   }
+  printf("\n");
 
   fclose(fp);
-
 }
 
 ///////////////////////////////////////////////////////////
@@ -586,7 +665,7 @@ static void read_ram(HANDLE fd)
 
   printf("Reading RAM and saving to %s\n", ram_filename);
 
-  fp = fopen(ram_filename, "w");
+  fp = fopen(ram_filename, "wb");
   if (!fp) {
     printf("Error creating %s: %s\n", rom_title, strerror(errno));
     return;
@@ -599,72 +678,19 @@ static void read_ram(HANDLE fd)
     return;
   }
 
-  wait_ms(50); /* give some time */
+  wait_ms(10); /* give some time */
 
-  size = receive_packet_header_size(fd);
+  size = recv_packet_header_size(fd);
   if (size > 0) {
-    receive_routine_file(fd, size, fp, 1);
+    recv_routine_file(fd, size, fp, 1);
   }
   else if (size == 0) {
     /* We must have size */
     printf("Error got no packet size!\n");
   }
-
-  fclose(fp);
-
-}
-
-///////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////
-static void verify_ram(HANDLE fd, FILE *fp, unsigned long ram_size)
-{
-  char option;
-  char clear_option;
-  unsigned char *RAM_read;
-  unsigned char *RAM_file;
-
-  if (verbose) printf("verify_ram\n");
-  
-  printf("Verify RAM?[y/n]? ");
-  option = getchar();
-  do { clear_option = getchar(); } while (clear_option != '\n');
-
-  if (option != 'y') return;
-
-  flush_serial(fd);
-
-  if (send_packet_routine(fd, READ_RAM_COMMAND)) return;
-
-  /* UGLY => TODO: compare chunks of data */
-  RAM_read = (unsigned char *)malloc(ram_size); // assume success
-  RAM_file = (unsigned char *)malloc(ram_size); // assume success
-
-  /* go back to begin of file */
-  rewind(fp);
-  fread(RAM_file, 1, ram_size, fp); // assume success
-
-  printf("#==========================#\n");
-  if (receive_packet_header_size(fd) == ram_size) {
-    if (receive_routine_buffer(fd, ram_size, RAM_read, ram_size, verbose) == 0) {
-      if (memcmp(RAM_read, RAM_file, ram_size) != 0) {
-        printf("ERROR COMPARING RAM!\n");
-      }
-      else {
-        printf("RAM OK!\n");
-      }
-    }
-    else {
-      printf("Error with RAM, try again\n");
-    }
-  }
-  else {
-    printf("Error with RAM, try again\n");
-  }
   printf("\n");
 
-  free(RAM_file);
-  free(RAM_read);
-
+  fclose(fp);
 }
 
 ///////////////////////////////////////////////////////////
@@ -673,9 +699,7 @@ static void write_ram(HANDLE fd)
 {
   FILE *fp;
   ssize_t ram_size;
-  ssize_t current_size;
   char ram_filename[32];
-  unsigned char tx_chunk[SEND_CHUNK_SIZE];
 
   if (verbose) printf("write_ram\n");
 
@@ -685,7 +709,7 @@ static void write_ram(HANDLE fd)
   }
 
   if (rom_title[0] == 0) {
-    // TODO: user input file name
+    // TODO: user input file name?
     printf("No info available\n");
     return;
   }
@@ -722,7 +746,7 @@ static void write_ram(HANDLE fd)
     }
   }
 
-  fp = fopen(ram_filename, "r");
+  fp = fopen(ram_filename, "rb");
   if (!fp) {
     printf("Error openning %s: %s\n", rom_title, strerror(errno));
     return;
@@ -735,26 +759,16 @@ static void write_ram(HANDLE fd)
     return;
   }
 
-  wait_ms(50); /* give some time */
+  wait_ms(10); /* give some time */
 
-  current_size = 0;
-  printf("#==========================#\n");
-  do {
-    if (fread(tx_chunk, 1, SEND_CHUNK_SIZE, fp) != SEND_CHUNK_SIZE) {
-      printf("Error reading from file: %s\n", strerror(errno));
-      break;
-    }
-    if (write(fd, tx_chunk, SEND_CHUNK_SIZE) != SEND_CHUNK_SIZE) {
-      printf("Error sending packet: %s\n", strerror(errno));
-      break;
-    }
-    current_size += SEND_CHUNK_SIZE;
-    wait_ms(50); /* give some time */
-    print_state_console(ram_size, current_size);
-  } while (!ctrlc && (current_size < ram_size));
-  printf("\n");
+  if (send_routine_file(fd, fp, ram_size, 1)) {
+    fclose(fp);
+    return;
+  }
 
   verify_ram(fd, fp, ram_size);
+
+  printf("\n");
 
   fclose(fp);
 }
@@ -767,44 +781,46 @@ int main(int argc, char *argv[])
   int next_option;
 
 #if defined(_WIN32) || defined(_WIN64)
-  wchar_t port_name[128];
-
   if (argc < 2) {
+    printf("\nNO ARGUMENTS PROVIDED!\n");
     print_usage(argv[0]);
     return EXIT_FAILURE;
   }
 
-  char_to_wchar(argv[1], port_name);
-  fd = CreateFile(port_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+  fd = CreateFileA(argv[1], GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
   if (fd == INVALID_HANDLE_VALUE) {
-    printf("Error opening %ws: %s\n", port_name, strerror(errno));
+    printf("Error opening %s: %s\n", argv[1], strerror(errno));
     return EXIT_FAILURE;
   }
   else {
-    BOOL Status;
     DCB dcb = { 0 };
     COMMTIMEOUTS tmo = { MAXDWORD, 0, 0, 0, 0 };
     
-    dcb.DCBlength = sizeof(dcb);
-    Status = GetCommState(fd, &dcb);
-    if (Status == FALSE) exit(1);
+    memset(&dcb, 0, sizeof(DCB));
+    dcb.DCBlength = sizeof(DCB);
+    if (GetCommState(fd, &dcb) == FALSE) {
+      CloseHandle(fd);
+      exit(1);
+    }
     
     dcb.BaudRate = SERIAL_BAUDRATE;
     dcb.ByteSize = 8;
     dcb.StopBits = ONESTOPBIT;
     dcb.Parity = NOPARITY;
     dcb.fAbortOnError = FALSE;
-    Status = SetCommState(fd, &dcb);
-    if (Status == FALSE) exit(1);
+    if (SetCommState(fd, &dcb) == FALSE) {
+      CloseHandle(fd);
+      exit(1);
+    }
     
-    Status = SetCommTimeouts(fd, &tmo);
-    if (Status == FALSE) exit(1);
-
-    Status = SetCommMask(fd, EV_RXCHAR | EV_TXEMPTY);
-    if (Status == FALSE) exit(1);
+    if (SetCommTimeouts(fd, &tmo) == FALSE) {
+      CloseHandle(fd);
+      exit(1);
+    }
   }
-
   if ((argc > 2) && strstr(argv[2], "-v")) verbose = 1;
+
+  SetConsoleCtrlHandler(handle_sig, TRUE);
 
 #else
   extern char *optarg;
@@ -817,7 +833,9 @@ int main(int argc, char *argv[])
   };
 
   char *port_name = NULL;
-  struct termios port_attr, port_attr_orig;
+  struct termios port_attr;
+  struct termios port_attr_orig;
+  speed_t speed = SERIAL_BAUDRATE;
 
   /* no argument provided */
   if (argc == 1) {
@@ -851,7 +869,7 @@ int main(int argc, char *argv[])
 
   /* check if setup parameters given and valid */
   if (!port_name) {
-    printf("\nSorry, no arduino tty device.\n\n");
+    printf("\nSorry, no device provided.\n\n");
     print_usage(argv[0]);
     return EXIT_FAILURE;
   }
@@ -859,7 +877,7 @@ int main(int argc, char *argv[])
   /* Install CTRL^C signal handler */
   sigaction(SIGINT, &int_handler, 0);
   
-  /* Open tty */
+  /* Open serial port */
   fd = open(port_name, O_RDWR);
   if (fd == -1) {
     printf("Error opening %s: %s\n", port_name, strerror(errno));
@@ -867,41 +885,9 @@ int main(int argc, char *argv[])
   }
   if (verbose) printf("%s opened.\n", port_name);
 
-  /* Get tty config and make backup */
+  /* Get port config and make backup */
   tcgetattr(fd, &port_attr);
-  port_attr_orig = port_attr;
-
-#if 0
-// __APPLE__
-  {
-    speed_t speed = SERIAL_BAUDRATE;
-    if (ioctl(fd, 0x80045402, &speed) == -1) {
-      printf("Error calling ioctl: %s\n", strerror(errno));
-      //return EXIT_FAILURE;
-    }
-  }
-
-#else
-  {
-    speed_t i_speed, o_speed;
-    i_speed = cfgetispeed(&port_attr);
-    if (i_speed != SERIAL_BAUDRATE) {
-      if (cfsetispeed(&port_attr, SERIAL_BAUDRATE) != 0) {
-        printf("Error setting baudrate %s: %s\n", port_name, strerror(errno));
-        //return EXIT_FAILURE;
-      }
-    }
-
-    o_speed = cfgetospeed(&port_attr);
-    if (o_speed != SERIAL_BAUDRATE) {
-      if (cfsetospeed(&port_attr, SERIAL_BAUDRATE) != 0) {
-        printf("Error setting baudrate %s: %s\n", port_name, strerror(errno));
-        //return EXIT_FAILURE;
-      }
-    }
-  }
-
-#endif /* __APPLE__ */
+  memcpy(&port_attr_orig, &port_attr, sizeof(struct termios));
 
   port_attr.c_cc[VMIN] = 0; /* Return always (non-block) */
   port_attr.c_cc[VTIME] = 0; /* Never return from read due to timeout */
@@ -910,20 +896,31 @@ int main(int argc, char *argv[])
   port_attr.c_oflag &= ~OPOST;
   port_attr.c_lflag &= ~(ISIG | ICANON | IEXTEN | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE);
 
-  if (tcsetattr(fd, TCSAFLUSH, &port_attr) == -1) {
+  if (tcsetattr(fd, TCSANOW, &port_attr) == -1) {
     printf("Error while setting %s options: %s\n", port_name, strerror(errno));
     close(fd);
     return EXIT_FAILURE;
   }
+
+#if __APPLE__
+  ioctl(fd, IOSSIOSPEED, &speed);
+
+#else
+  cfsetispeed(&port_attr, speed);
+  cfsetospeed(&port_attr, speed);
+
+#endif /* __APPLE__ */
 
   if (verbose) printf("%s successfully configured.\n", port_name);
 
 #endif /* _WIN32 || _WIN64 */
 
   printf("Setting everything up\n");
-  wait_ms(1200);
+  wait_ms(1200); /* delay after arduino reset */
 
   do {
+    char clear_option;
+
     printf("#=========================================================#\n");
     printf("#=============== Arduino-GBx-Reader-Writer ===============#\n");
     printf("0) Read Cartidge Header\n");
@@ -937,12 +934,10 @@ int main(int argc, char *argv[])
       printf("Invalid option\n");
       continue;
     }
-    {
-      char clear_option;
-      do { clear_option = getchar(); } while (clear_option != '\n');
-    }
+    do { clear_option = getchar(); } while (clear_option != '\n');
     next_option -= 48;
 
+    printf("#==========================#\n");
     switch (next_option) {
       case 0:
         *rom_title = 0;
@@ -970,13 +965,15 @@ int main(int argc, char *argv[])
     }
   } while (!ctrlc);
 
+  if (verbose && ctrlc) printf("ABORTED OK!\n");
+
 #if defined(_WIN32) || defined(_WIN64)
   CloseHandle(fd);
 
 #else
-  /* Revert to original tty config */
+  /* Revert to original port config */
   if (tcsetattr(fd, TCSANOW, &port_attr_orig) == -1) {
-    printf("Error while reverting original tty config: %s\n", strerror(errno));
+    printf("Error reverting original port config: %s\n", strerror(errno));
   }
 
   close(fd);

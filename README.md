@@ -1,18 +1,26 @@
 # Arduino-GBx-Reader-Writer
 
-Read or Write your Game Boy save data to/from PC.
+Read or Write your Game Boy games save data with an Arduino and PC.
+
 
 
 Table of contents
 -----------------
 
 - [Introduction](#introduction)
+	- [Helpful websites](#helpful-websites):
 - [Pinout](#pinout)
-- [How to](#how-to)
 - [Compatibility](#compatibility)
-- [Example](#example)
-	- [Setup](#setup)
-	- [Use](#use)
+- [Setup](#setup)
+	- [Windows](#windows)
+	- [macOS & Linux](#macos-linux)
+- [How To](#how-to)
+	- [USB devices names](#usb-devices-name)
+	- [Windows](#windows)
+	- [macOS & Linux](#macos-linux)
+- [Examples](#examples)
+	- [Windows](#windows)
+	- [macOS & Linux](#macos-linux)
 - [TODO](#todo)
 - [License](#license)
 
@@ -21,20 +29,20 @@ Table of contents
 Introduction
 ------------
 
-While searching for a way to read and write save games from my game boy cartridges (because you know...if the battery die you say goodbye to save data) I didn't come across any cheap solution.
+While searching for a way to read save games from my game boy cartridges (because you know...if the battery dies you say goodbye to save data) I didn't come across any cheap solution.
 
 After some search I stumbled on ATmega1284p from way back when I started using Arduino and learning about AVR. I did remember this ATmega1284p (already on breadboard!!!) had [maniacbug](https://github.com/maniacbug/mighty-1284p) code to work with Arduino! Lucky me!!
 
 Then I started reading about cartridges and how to communicate with them, destroyed an Nintendo DS to get the cartridge connector, removed the protection to be compatible with GB and GBC cartridges and it was time to code!
 
-This works with ATmega1284p (Mighty 1284P from [maniacbug](https://github.com/maniacbug/mighty-1284p)), but [MightyCore](https://github.com/MCUdude/MightyCore) should also be compatible!
+This works with ATmega1284p (Mighty 1284P from [maniacbug](https://github.com/maniacbug/mighty-1284p)) and [MightyCore](https://github.com/MCUdude/MightyCore).
 
-Also, I didn't changed the default configuration of the ATmega1284p and I'm using 16Mhz external crystal.
+Also, I didn't changed the default configuration of my ATmega1284p and I'm using 16Mhz external crystal.
 
-WARNING: you need an RS232 to USB converter (like the FT232R and use `PD0` and `PD1` pins).
+WARNING: you need an RS232 to USB converter (like the FT232R).
 
 
-Helpful websites:
+#### Helpful websites:
 
 - [The Cartridge Header](https://gbdev.gg8.se/wiki/articles/The_Cartridge_Header)
 - [Memory Bank Controllers](https://gbdev.gg8.se/wiki/articles/Memory_Bank_Controllers#Multicart_MBCs)
@@ -77,50 +85,76 @@ Pinout
 
 
 
-How to
-------------
-
-1. Follow the pinout to connect the cartridge connector to ATmega1284p (don't forget the RS232 to USB converter)
-2. Connect the Arduino to your PC and upload the sketch (may need to change SERIAL_BAUDRATE)
-3. Compile the C program with a simple `make` (may need to change SERIAL_BAUDRATE if Arduino sketch was changed)
-4. Run the program and supply the __MINIMAL__ arguments:
-    * Arduino port e.g. `-p /dev/ttyUSB0`
-
-
-
 Compatibility
 ----------------------
-I've developed on macOS Catalina version 0.15.7 (19H2).
-I've also tested on Debian machine with GCC 8 and it should work with any POSIX compatible OS.
-On Windows I recommend installing Visual Studio!
 
-### USB device names
-- In Mac are: `/dev/cu.usbmodem14931` or `/dev/cu.usbserial-1420`
-- In Linux are: `/dev/ttyUSB*` or `/dev/ttyACM*`, where * should be 0. (you need to be root or in [group-mode](http://playground.arduino.cc/Linux/All#Permission))
-- In Windows are: `COM*`
+I've developed and tested on macOS Catalina version 0.15.7 (19H2) and also tested on Debian x64 machine with GCC 8.
+The code should be compatible with any POSIX OS.
+On Windows I recommend installing Visual Studio or use the provided x86 executable.
 
 
-Example
+
+Setup
 ------------
 
+### Arduino
+1. Follow the pinout to connect the cartridge connector to ATmega1284p
+2. Connect any compatible RS232 to USB converter to pins `PD0` and `PD1`
 
-### Setup
+### Windows
+1. Upper right corner: __Code__ -> __Download ZIP__
+
+### macOS & Linux
+
 ```
 $ git clone git@github.com:DMRodrigues/Arduino-GBx-Reader-Writer.git
 $ cd Arduino-GBx-Reader-Writer
-$ make
 ```
 
-### Use
-`./gbx-reader-writer -p /dev/cu.usbserial-1420`
 
-After this interact with the shell by choosing 0 - 4.
+
+How To
+------------
+
+### USB devices names
+- In Mac are: `/dev/cu.usbmodem*` or `/dev/cu.usbserial-*`
+- In Linux are: `/dev/ttyUSB*` or `/dev/ttyACM*` (you need to be root or in [group-mode](http://playground.arduino.cc/Linux/All#Permission))
+- In Windows are: `COM*`
+
+### Windows
+1. Connect the Arduino to your PC and upload the sketch
+2. Navigate to executables folder and open the command line
+3. Execute the `GBx-Reader-Writer.exe` and provide the USB port
+    * USB port e.g. `COM9`
+4. Interact with the shell by choosing 0 - 4.
+
+### macOS & Linux
+1. Connect the Arduino to your PC and upload the sketch
+2. Open the command line
+3. Compile the C program with `make`
+4. Execute `gbx-reader-writer` and provide the USB port
+    * USB port e.g. `-p /dev/ttyUSB0`
+5. Interact with the shell by choosing 0 - 4.
+
+
+
+Examples
+------------
+
+### Windows
+```
+GBx-Reader-Writer.exe COM9
+```
+
+### macOS & Linux
+```
+./gbx-reader-writer -p /dev/ttyUSB0
+```
 
 
 
 TODO
 ------------
-- Test serial speed bigger than 115200
 
 - Implement Game Boy Advance games logic
 
@@ -129,9 +163,9 @@ TODO
 License
 ------------
 
-The MIT License (MIT)
+MIT License
 
-Copyright (c) 2020 Diogo Miguel Rodrigues
+Copyright (c) 2020 Diogo Rodrigues
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
