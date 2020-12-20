@@ -222,8 +222,9 @@ static const char* print_cartridge_string(unsigned char cartridge_type)
     case 0xFD:   return("FDh - BANDAI TAMA5");
     case 0xFE:   return("FEh - HuC3");
     case 0xFF:   return("FFh - HuC1+RAM+BATTERY");
-    default:     return("UNKNOW");
+    default:     break;
   }
+  return("UNKNOW");
 }
 
 ///////////////////////////////////////////////////////////
@@ -243,8 +244,9 @@ static const char* print_rom_size(unsigned char rom_size)
     case 0x52:   return("52h - 1.1MByte(72 banks)");
     case 0x53:   return("53h - 1.2MByte(80 banks)");
     case 0x54:   return("54h - 1.5MByte(96 banks)");
-    default:     return("UNKNOW");
+    default:     break;
   }
+  return("UNKNOW");
 }
 
 ///////////////////////////////////////////////////////////
@@ -258,8 +260,9 @@ static const char* print_ram_size(unsigned char ram_size)
     case 0x03:   return("03h - 32 KBytes(4 banks of 8KBytes each)");
     case 0x04:   return("04h - 128 KBytes(16 banks of 8KBytes each)");
     case 0x05:   return("05h - 64 KBytes(8 banks of 8KBytes each)");
-    default:     return("UNKNOW");
+    default:     break;
   }
+  return("UNKNOW");
 }
 
 ///////////////////////////////////////////////////////////
@@ -416,7 +419,7 @@ static unsigned char recv_routine_file(HANDLE fd, ssize_t packet_size, FILE *fp,
 
   start = get_time();
   do {
-    ret = read(fd, rx_chunk, sizeof(rx_chunk));
+    ret = read(fd, rx_chunk, RECV_CHUNK_SIZE);
     if (ret > 0) {
       if (fwrite(rx_chunk, 1, ret, fp) != ret) {
         printf("Error writing to file: %s\n", strerror(errno));
@@ -465,7 +468,7 @@ static unsigned char send_routine_file(HANDLE fd, FILE *fp, ssize_t file_size, u
       break;
     }
     current_size += SEND_CHUNK_SIZE;
-    wait_ms(10); /* let's wait */
+    wait_ms(5); /* let's wait */
     if (print_state) print_state_console(file_size, current_size);
   } while (!ctrlc && (current_size < file_size));
   if (print_state) printf("\n");
@@ -512,7 +515,7 @@ static void verify_ram(HANDLE fd, FILE *fp, unsigned long ram_size)
   if (recv_packet_header_size(fd) == ram_size) {
     if (recv_routine_buffer(fd, ram_size, RAM_read, ram_size, verbose) == 0) {
       if (memcmp(RAM_read, RAM_file, ram_size) != 0) {
-        printf("=> ERROR COMPARING RAM!\n");
+        printf("=> RAM NOK(possibly corrupted)!\n");
       }
       else {
         printf("=> RAM OK!\n");
@@ -536,19 +539,25 @@ static unsigned char get_ram_size(HANDLE fd, ssize_t *out_ram_size)
 {
   ssize_t size;
   unsigned char ram_info[4];
-
-  *out_ram_size = 0;
-  memset(ram_info, 0, sizeof(ram_info));
   
   if (verbose) printf("get_ram_size\n");
 
+  flush_serial(fd);
+
   if (send_packet_routine(fd, GET_RAM_SIZE)) return 1;
+
+  wait_ms(10); /* give some time */
 
   size = recv_packet_header_size(fd);
   if (size > 0) {
-    if (recv_routine_buffer(fd, size, ram_info, sizeof(ram_info), 0)) return 1;
+    if (recv_routine_buffer(fd, size, ram_info, sizeof(ram_info), 0)) return 2;
   }
-  
+  else {
+    /* We must have size */
+    printf("Error got no packet size!\n");
+    return 3;
+  }
+
   *out_ram_size = long_from_array(ram_info);
   if (verbose) printf("Got RAM size: %ld\n", *out_ram_size);
 
@@ -560,35 +569,43 @@ static unsigned char get_ram_size(HANDLE fd, ssize_t *out_ram_size)
 static void read_header(HANDLE fd, unsigned char to_print)
 {
   ssize_t size;
-  char cartridge_info[32];
+  unsigned char ChecksumOK;
+  char info[32];
 
-  if (verbose) printf("read_metadata\n");
-
-  *rom_title = 0;
+  if (verbose) printf("read_header\n");
 
   flush_serial(fd);
 
-  if (send_packet_routine(fd, READ_HEADER_COMMAND)) return;
+  if (send_packet_routine(fd, READ_HEADER_COMMAND)) goto L_END_READ_HEADER;
 
   wait_ms(10); /* give some time */
 
   size = recv_packet_header_size(fd);
-  if (size > 0) {
-    if (recv_routine_buffer(fd, size, (unsigned char *)cartridge_info, sizeof(cartridge_info), to_print)) return;
-    if (to_print) {
-      printf("Rom title: %s\n", cartridge_info + 1);
-      printf("Cartridge type: %s\n", print_cartridge_string(cartridge_info[cartridge_info[0] + 1 + 1]));
-      printf("Rom size: %s\n", print_rom_size(cartridge_info[cartridge_info[0] + 1 + 2]));
-      printf("Ram size: %s\n", print_ram_size(cartridge_info[cartridge_info[0] + 1 + 3]));
-      printf("Rom version: %d\n", cartridge_info[cartridge_info[0] + 1 + 4]);
-      printf("Checksum: %d\n", cartridge_info[cartridge_info[0] + 1 + 5]);
-    }
-    memcpy(rom_title, cartridge_info + 1, cartridge_info[0] + 1);
-  }
-  else if (size == 0) {
+  if (size <= 0) {
     /* We must have size */
     printf("Error got no packet size!\n");
+    goto L_END_READ_HEADER;
   }
+
+  if (recv_routine_buffer(fd, size, (unsigned char *)info, sizeof(info), to_print)) goto L_END_READ_HEADER;
+
+  ChecksumOK = info[info[0] + 1 + 5];
+  if (ChecksumOK) {
+    if (to_print) {
+      printf("Rom title: %s\n", info + 1);
+      printf("Cartridge type: %s\n", print_cartridge_string(info[info[0] + 1 + 1]));
+      printf("Rom size: %s\n", print_rom_size(info[info[0] + 1 + 2]));
+      printf("Ram size: %s\n", print_ram_size(info[info[0] + 1 + 3]));
+      printf("Rom version: %d\n", info[info[0] + 1 + 4]);
+      printf("Checksum: %d\n", info[info[0] + 1 + 5]);
+    }
+    memcpy(rom_title, info + 1, info[0] + 1);
+  }
+  else {
+    printf("No cartridge inserted or cartridge read failed!\n");
+  }
+
+L_END_READ_HEADER:
   if (to_print) printf("\n");
 }
 
@@ -603,7 +620,10 @@ static void read_rom(HANDLE fd)
 
   if (verbose) printf("read_rom\n");
 
-  if (rom_title[0] == 0) strcat(rom_title, "ROM");
+  if (rom_title[0] == 0) {
+    printf("Error no cartridge info\n");
+    goto L_END_READ_ROM;
+  }
 
   i = strlen(rom_title);
   memcpy(rom_filename, rom_title, i + 1);
@@ -616,15 +636,15 @@ static void read_rom(HANDLE fd)
 
   fp = fopen(rom_filename, "wb");
   if (!fp) {
-    printf("Error creating %s: %s\n", rom_title, strerror(errno));
-    return;
+    printf("Error creating %s: %s\n", rom_filename, strerror(errno));
+    goto L_END_READ_ROM;
   }
 
   flush_serial(fd);
 
   if (send_packet_routine(fd, READ_ROM_COMMAND)) {
     fclose(fp);
-    return;
+    goto L_END_READ_ROM;
   }
 
   wait_ms(10); /* give some time */
@@ -633,13 +653,15 @@ static void read_rom(HANDLE fd)
   if (size > 0) {
     recv_routine_file(fd, size, fp, 1);
   }
-  else if (size == 0) {
+  else {
     /* We must have size */
     printf("Error got no packet size!\n");
   }
-  printf("\n");
 
   fclose(fp);
+
+L_END_READ_ROM:
+  printf("\n");
 }
 
 ///////////////////////////////////////////////////////////
@@ -653,7 +675,10 @@ static void read_ram(HANDLE fd)
 
   if (verbose) printf("read_ram\n");
 
-  if (rom_title[0] == 0) strcat(rom_title, "RAM");
+  if (rom_title[0] == 0) {
+    printf("Error no cartridge info\n");
+    goto L_END_READ_RAM;
+  }
 
   i = strlen(rom_title);
   memcpy(ram_filename, rom_title, i + 1);
@@ -667,15 +692,15 @@ static void read_ram(HANDLE fd)
 
   fp = fopen(ram_filename, "wb");
   if (!fp) {
-    printf("Error creating %s: %s\n", rom_title, strerror(errno));
-    return;
+    printf("Error creating %s: %s\n", ram_filename, strerror(errno));
+    goto L_END_READ_RAM;
   }
 
   flush_serial(fd);
 
   if (send_packet_routine(fd, READ_RAM_COMMAND)) {
     fclose(fp);
-    return;
+    goto L_END_READ_RAM;
   }
 
   wait_ms(10); /* give some time */
@@ -684,13 +709,15 @@ static void read_ram(HANDLE fd)
   if (size > 0) {
     recv_routine_file(fd, size, fp, 1);
   }
-  else if (size == 0) {
+  else {
     /* We must have size */
     printf("Error got no packet size!\n");
   }
-  printf("\n");
 
   fclose(fp);
+
+L_END_READ_RAM:
+  printf("\n");
 }
 
 ///////////////////////////////////////////////////////////
@@ -703,17 +730,17 @@ static void write_ram(HANDLE fd)
 
   if (verbose) printf("write_ram\n");
 
-  if (get_ram_size(fd, &ram_size)) {
-    printf("Error try again\n");
-    return;
+  if (rom_title[0] == 0) {
+    printf("Error no cartridge info\n");
+    goto L_END_WRITE_RAM;
   }
 
-  if (rom_title[0] == 0) {
-    // TODO: user input file name?
-    printf("No info available\n");
-    return;
+  if (get_ram_size(fd, &ram_size)) {
+    printf("Error try again\n");
+    goto L_END_WRITE_RAM;
   }
-  else {
+
+  if (ram_size > 0) {
     int i;
     char option;
     char clear_option;
@@ -728,12 +755,12 @@ static void write_ram(HANDLE fd)
     ram_filename[i++] = '\0';
 
     if (get_file_size(ram_filename, &compare_size)) {
-      printf("No file found or could't open file\n");
-      return;
+      printf("No file found or couldn't open file\n");
+      goto L_END_WRITE_RAM;
     }
     if (ram_size != compare_size) {
       printf("RAM file cannot be used!\n");
-      return;
+      goto L_END_WRITE_RAM;
     }
 
     printf("Use RAM file %s[y/n]? ", ram_filename);
@@ -742,35 +769,36 @@ static void write_ram(HANDLE fd)
 
     if (option != 'y') {
       printf("No action done!\n");
-      return;
+      goto L_END_WRITE_RAM;
     }
   }
 
   fp = fopen(ram_filename, "rb");
   if (!fp) {
-    printf("Error openning %s: %s\n", rom_title, strerror(errno));
-    return;
+    printf("Error openning %s: %s\n", ram_filename, strerror(errno));
+    goto L_END_WRITE_RAM;
   }
 
   flush_serial(fd);
 
   if (send_packet_routine(fd, WRITE_RAM_COMMAND)) {
     fclose(fp);
-    return;
+    goto L_END_WRITE_RAM;
   }
 
-  wait_ms(10); /* give some time */
+  wait_ms(50); /* give some time */
 
   if (send_routine_file(fd, fp, ram_size, 1)) {
     fclose(fp);
-    return;
+    goto L_END_WRITE_RAM;
   }
 
   verify_ram(fd, fp, ram_size);
 
-  printf("\n");
-
   fclose(fp);
+
+L_END_WRITE_RAM:
+  printf("\n");
 }
 
 ///////////////////////////////////////////////////////////
@@ -944,18 +972,18 @@ int main(int argc, char *argv[])
         read_header(fd, 1);
         break;
       case 1:
-        read_header(fd, 0);
-        wait_ms(50); /* give some time */
+        *rom_title = 0;
+        read_header(fd, verbose);
         read_rom(fd);
         break;
       case 2:
-        read_header(fd, 0);
-        wait_ms(50); /* give some time */
+        *rom_title = 0;
+        read_header(fd, verbose);
         read_ram(fd);
         break;
       case 3:
-        read_header(fd, 0);
-        wait_ms(50); /* give some time */
+        *rom_title = 0;
+        read_header(fd, verbose);
         write_ram(fd);
         break;
       case 4:

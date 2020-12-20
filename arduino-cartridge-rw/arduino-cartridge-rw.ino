@@ -60,8 +60,8 @@
 #define GetROMBanks()         ( (RomSize >= 1 ? (2 << RomSize) : 2) )
 
 ///////////////////////////////////////////////////////////
-#define GetLongFromCHAR(B)    ( ((unsigned long)B[0] << 24) | ((unsigned long)B[1] << 16) | ((unsigned long)B[2] << 8) | (unsigned long)B[3]          )
-#define SetLongToCHAR(B, L)   ( B[0] = ((L & 0xFF000000LU) >> 24), B[1] = ((L & 0xFF0000LU) >> 16), B[2] = ((L & 0xFF00LU) >> 8), B[3] = (L & 0xFFLU) )
+#define LongFromArray(R(B)   ( ((unsigned long)B[0] << 24) | ((unsigned long)B[1] << 16) | ((unsigned long)B[2] << 8) | (unsigned long)B[3]          )
+#define LongToArray(B, L)    ( B[0] = ((L & 0xFF000000LU) >> 24), B[1] = ((L & 0xFF0000LU) >> 16), B[2] = ((L & 0xFF00LU) >> 8), B[3] = (L & 0xFFLU) )
 
 ///////////////////////////////////////////////////////////
 #define EnableRAM()           ( WriteByte(0x0000, 0x0A) )
@@ -102,10 +102,9 @@ unsigned char ReadByte(unsigned int address)
 {
   unsigned char result;
   WriteAddress(address);
-  asm volatile("nop"); // volatile to ensure optimizations don't remove it
   ChipSelectPinLow();
   ReadPinLow();
-  asm volatile("nop");
+  asm volatile("nop"); // volatile to ensure optimizations don't remove it
   asm volatile("nop");
   asm volatile("nop");
   result = PINB;
@@ -119,9 +118,9 @@ void WriteByte(unsigned int address, unsigned char data)
 {
   DataPinsOutput();
   WriteAddress(address);
-  asm volatile("nop");
   PORTB = data;
   WritePinLow();
+  asm volatile("nop");
   asm volatile("nop");
   WritePinHigh();
   DataPinsInput();
@@ -166,8 +165,9 @@ unsigned short GetRAMBanks()
     case 0x05:
       return 8;
     default:
-      return 0;
+      break;
   }
+  return 0;
 }
 
 ///////////////////////////////////////////////////////////
@@ -361,6 +361,22 @@ void RecvWriteRAM()
 }
 
 ///////////////////////////////////////////////////////////
+void SendSizeRAM()
+{
+  Serial.write(0x10);
+  Serial.write(0x02);
+  SendPacketSize(4);
+  if (RamSize == 0) {
+    SendPacketSize(0);
+  }
+  else {
+    unsigned char ramBanks = GetRAMBanks();
+    unsigned long ramMaxAddress = GetMaxAddressRAM();
+    SendPacketSize(ramBanks * (ramMaxAddress - 0xA000UL));
+  }
+}
+
+///////////////////////////////////////////////////////////
 void setup()
 {
   DDRC = B11111111;
@@ -424,20 +440,12 @@ void loop()
       ReadSendRAM();
       break;
     case WRITE_RAM_COMMAND:
+      /* We need: CartridgeType + RamSize */
       RecvWriteRAM();
       break;
     case GET_RAM_SIZE:
-      Serial.write(0x10);
-      Serial.write(0x02);
-      SendPacketSize(4);
-      if (RamSize == 0) {
-        SendPacketSize(0);
-      }
-      else {
-        unsigned char ramBanks = GetRAMBanks();
-        unsigned long ramMaxAddress = GetMaxAddressRAM();
-        SendPacketSize(ramBanks * (ramMaxAddress - 0xA000UL));
-      }
+      /* We need: CartridgeType */
+      SendSizeRAM();
       break;
     default:
       break;

@@ -8,10 +8,12 @@ Table of contents
 -----------------
 
 - [Introduction](#introduction)
-	- [Helpful websites](#helpful-websites):
+	- [Helpful websites](#helpful-websites)
+	- [Notes](#notes)
 - [Pinout](#pinout)
 - [Compatibility](#compatibility)
 - [Setup](#setup)
+	- [Arduino](#arduino)
 	- [Windows](#windows)
 	- [macOS & Linux](#macos-linux)
 - [How To](#how-to)
@@ -35,18 +37,20 @@ After some search I stumbled on ATmega1284p from way back when I started using A
 
 Then I started reading about cartridges and how to communicate with them, destroyed an Nintendo DS to get the cartridge connector, removed the protection to be compatible with GB and GBC cartridges and it was time to code!
 
-This works with ATmega1284p (Mighty 1284P from [maniacbug](https://github.com/maniacbug/mighty-1284p)) and [MightyCore](https://github.com/MCUdude/MightyCore).
 
-Also, I didn't changed the default configuration of my ATmega1284p and I'm using 16Mhz external crystal.
-
-WARNING: you need an RS232 to USB converter (like the FT232R).
-
-
-#### Helpful websites:
+#### Helpful websites
 
 - [The Cartridge Header](https://gbdev.gg8.se/wiki/articles/The_Cartridge_Header)
 - [Memory Bank Controllers](https://gbdev.gg8.se/wiki/articles/Memory_Bank_Controllers#Multicart_MBCs)
 - [GBCartRead – Gameboy Cart Reader](https://www.insidegadgets.com/projects/gbcartread-gameboy-cart-reader)
+
+
+#### Notes
+
+You will need an RS232 to USB converter (like the FT232R) to connect the ATmega1284p to PC.
+
+This works with ATmega1284p (Mighty 1284P from [maniacbug](https://github.com/maniacbug/mighty-1284p)) and [MightyCore](https://github.com/MCUdude/MightyCore).
+I didn't changed the default configuration of my ATmega1284p and I'm using 16Mhz external crystal.
 
 
 
@@ -89,7 +93,9 @@ Compatibility
 ----------------------
 
 I've developed and tested on macOS Catalina version 0.15.7 (19H2) and also tested on Debian x64 machine with GCC 8.
+
 The code should be compatible with any POSIX OS.
+
 On Windows I recommend installing Visual Studio or use the provided x86 executable.
 
 
@@ -156,7 +162,7 @@ GBx-Reader-Writer.exe COM9
 TODO
 ------------
 
-- Implement Game Boy Advance games logic
+- Game Boy Advance games (WARNING: 5v from Arduino will damage the GBA cartridges that works with 3.3v)
 
 
 
