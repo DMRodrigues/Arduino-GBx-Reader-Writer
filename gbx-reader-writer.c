@@ -468,7 +468,7 @@ static unsigned char send_routine_file(HANDLE fd, FILE *fp, ssize_t file_size, u
       break;
     }
     current_size += SEND_CHUNK_SIZE;
-    wait_ms(5); /* let's wait */
+    wait_ms(10); /* let's wait */
     if (print_state) print_state_console(file_size, current_size);
   } while (!ctrlc && (current_size < file_size));
   if (print_state) printf("\n");

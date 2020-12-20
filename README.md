@@ -8,8 +8,8 @@ Table of contents
 -----------------
 
 - [Introduction](#introduction)
-	- [Helpful websites](#helpful-websites)
 	- [Notes](#notes)
+- [About Game Boy Cartridges](#about-game-boy-cartridges)
 - [Pinout](#pinout)
 - [Compatibility](#compatibility)
 - [Setup](#setup)
@@ -38,19 +38,20 @@ After some search I stumbled on ATmega1284p from way back when I started using A
 Then I started reading about cartridges and how to communicate with them, destroyed an Nintendo DS to get the cartridge connector, removed the protection to be compatible with GB and GBC cartridges and it was time to code!
 
 
-#### Helpful websites
-
-- [The Cartridge Header](https://gbdev.gg8.se/wiki/articles/The_Cartridge_Header)
-- [Memory Bank Controllers](https://gbdev.gg8.se/wiki/articles/Memory_Bank_Controllers#Multicart_MBCs)
-- [GBCartRead – Gameboy Cart Reader](https://www.insidegadgets.com/projects/gbcartread-gameboy-cart-reader)
-
-
 #### Notes
 
 You will need an RS232 to USB converter (like the FT232R) to connect the ATmega1284p to PC.
 
-This works with ATmega1284p (Mighty 1284P from [maniacbug](https://github.com/maniacbug/mighty-1284p)) and [MightyCore](https://github.com/MCUdude/MightyCore).
-I didn't changed the default configuration of my ATmega1284p and I'm using 16Mhz external crystal.
+This works with ATmega1284p (Mighty 1284P from [maniacbug](https://github.com/maniacbug/mighty-1284p)) and [MightyCore](https://github.com/MCUdude/MightyCore). Use the default configurations with 16Mhz external crystal.
+
+
+
+About Game Boy Cartridges
+------------
+
+- [The Cartridge Header](https://gbdev.gg8.se/wiki/articles/The_Cartridge_Header)
+- [Memory Bank Controllers](https://gbdev.gg8.se/wiki/articles/Memory_Bank_Controllers#Multicart_MBCs)
+- [GBCartRead – Gameboy Cart Reader](https://www.insidegadgets.com/projects/gbcartread-gameboy-cart-reader)
 
 
 
@@ -92,11 +93,9 @@ Pinout
 Compatibility
 ----------------------
 
-I've developed and tested on macOS Catalina version 0.15.7 (19H2) and also tested on Debian x64 machine with GCC 8.
+I've developed and tested on macOS Catalina version 0.15.7 (19H2) and also tested on Debian x64 machine with GCC 8. The code should be compatible with any POSIX OS.
 
-The code should be compatible with any POSIX OS.
-
-On Windows I recommend installing Visual Studio or use the provided x86 executable.
+On Windows I recommend installing Visual Studio to compile the code or use the provided x86 executable.
 
 
 
@@ -123,9 +122,9 @@ How To
 ------------
 
 ### USB devices names
-- In Mac are: `/dev/cu.usbmodem*` or `/dev/cu.usbserial-*`
-- In Linux are: `/dev/ttyUSB*` or `/dev/ttyACM*` (you need to be root or in [group-mode](http://playground.arduino.cc/Linux/All#Permission))
-- In Windows are: `COM*`
+- macOS: `/dev/cu.usbmodem*` or `/dev/cu.usbserial-*`
+- Linux: `/dev/ttyUSB*` or `/dev/ttyACM*` (you need to be root or in [group-mode](http://playground.arduino.cc/Linux/All#Permission))
+- Windows: `COM*`
 
 ### Windows
 1. Connect the Arduino to your PC and upload the sketch
